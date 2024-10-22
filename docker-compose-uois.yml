@@ -1,0 +1,137 @@
+﻿version: '3.8'
+x-services-volume:
+  &system-data-volume
+  type: bind
+  source: ./systemdata.min.json
+  target: /app/systemdata.json
+
+services:
+  apollo:
+    image: hrbolek/apollo_federation:latest
+    container_name: apollo
+    environment:
+      # promenne, ktere lze cist v kontejneru
+      - PORT=3000
+      - |
+        SERVICES=
+        [
+          {"name": "events", "url": "http://gql_events:8000/gql"},
+          {"name": "ug", "url": "http://gql_ug:8000/gql"}
+        ]
+    healthcheck:
+      # definice, umoznujici provest test, zda je kontejner v poradku (vsimnete si portu a srovnejte s portem v environment)
+      interval: 60s
+      retries: 3
+      start_period: 60s
+      timeout: 10s
+    restart: on-failure:3 # nedojde k restartu pokud je kontejner "unhealthy", maximalne 3 pokusy
+    ports:
+      #v deploymentu by nebylo zadne mapovani portu
+      #   # vnejsi port : port, kde sluzbu poskytuje kontejner
+      - 33000:3000
+    depends_on:
+      - gql_events
+      - gql_ug
+
+  gql_events:
+    # image: dangquytaikb/gql_events:latest
+    image: hrbolek/gql_events
+    container_name: gql_events
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - CONNECTION_STRING=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}?ssl=require
+      - GQLUG_ENDPOINT_URL=http://gql_events:8000/gql
+      - JWTPUBLICKEYURL=http://frontend:8000/oauth/publickey
+      - JWTRESOLVEUSERPATHURL=http://frontend:8000/oauth/userinfo
+      - DEMO=False
+      - DEMODATA=True
+    healthcheck:
+      # definice, umoznujici provest test, zda je kontejner v poradku
+      test: "curl -f -H 'Content-Type: application/json' -X POST -d '{\"query\":\"query{__schema{types{name}}}\"}' http://localhost:8000/gql || exit 1"
+      interval: 30s
+      retries: 10
+      start_period: 30s
+      timeout: 10s
+    restart: on-failure:3 # nedojde k restartu pokud je kontejner "unhealthy", maximalne 3 pokusy
+    ports:
+      - 32803:8000
+
+  gql_ug:
+    image: hrbolek/gql_ug
+    container_name: gql_ug
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - CONNECTION_STRING=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}?ssl=require
+      - GQLUG_ENDPOINT_URL=http://gql_ug:8000/gql
+      - JWTPUBLICKEYURL=http://frontend:8000/oauth/publickey
+      - JWTRESOLVEUSERPATHURL=http://frontend:8000/oauth/userinfo
+      - DEMO=False
+      - DEMODATA=True
+    healthcheck:
+      # definice, umoznujici provest test, zda je kontejner v poradku
+      test: "curl -f -H 'Content-Type: application/json' -X POST -d '{\"query\":\"query{__schema{types{name}}}\"}' http://localhost:8000/gql || exit 1"
+      interval: 30s
+      retries: 10
+      start_period: 30s
+      timeout: 10s
+    restart: on-failure:3 # nedojde k restartu pokud je kontejner "unhealthy", maximalne 3 pokusy
+    ports:
+      - 32800:8000
+
+  # ######################## frontend ##############################
+  frontend:
+    image: hrbolek/frontend:latest
+    environment:
+      - DEMO=False
+      - DEMODATA=True
+      # link na db mimo stack
+      # - POSTGRES_HOST=host.docker.internal:5432
+      # - POSTGRES_HOST=cockroach_credentials:26260 
+      # - CONNECTION_STRING=cockroachdb+asyncpg://root:@cockroach_credentials:26260/mycrdb?ssl=disable
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - CONNECTION_STRING=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/${POSTGRES_DB}?ssl=require
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - GQL_PROXY=http://apollo:3000/api/gql/
+      - SALT=fe1c71b2-74c0-41e5-978f-eecbffac7418
+    healthcheck:
+      # definice, umoznujici provest test, zda je kontejner v poradku (vsimnete si portu)
+      test: "curl -f -X GET http://localhost:8000/ || exit 1"
+      interval: 60s
+      retries: 3
+      start_period: 60s
+      timeout: 10s
+    restart: on-failure:3 # nedojde k restartu pokud je kontejner "unhealthy", maximalne 3 pokusy
+
+    ports:
+      - 33001:8000
+    volumes:
+      - <<: *system-data-volume
+    # volumes:
+    # # for development
+    #   - ./server/htmls:/app/server/htmls
+    #   - ./server/config.json:/app/server/config.json
+
+
+
+  # ######################## haproxy ##############################
+  lb:
+    container_name: lb
+    image: haproxy:latest
+    ports:
+      - "5433:5433"
+      - "15433:15433"
+      - "8081:8081"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - yugabyted-0
+      - yugabyted-1
+      - yugabyted-2

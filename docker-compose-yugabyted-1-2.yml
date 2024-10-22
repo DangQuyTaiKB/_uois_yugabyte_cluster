@@ -1,0 +1,45 @@
+﻿services:
+  yugabyted-1:
+    container_name: yugabyted-1
+    hostname: yugabyted-1
+    # image: yugabytedb/yugabyte:2.20.3.1-b2
+    image: yugabytedb/yugabyte:2.23.0.0-b710
+    command:
+    - sh
+    - -c
+    - |
+      bin/yugabyted start --secure --advertise_address=yugabyted-1 --daemon=false --join=yugabyted-0 --tserver_flags='ysql_enable_profile=true' --ysql_enable_auth=true
+    restart: unless-stopped
+    ports:
+      - "7001:7000"
+      - "9001:9000"
+      - "5434:5433"
+    healthcheck:
+      test: ["CMD", "/home/yugabyte/postgres/bin/pg_isready", "-h", "yugabyted-0"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  yugabyted-2:
+    container_name: yugabyted-2
+    hostname: yugabyted-2
+    # image: yugabytedb/yugabyte:2.20.3.1-b2
+    image: yugabytedb/yugabyte:2.23.0.0-b710
+    platform: linux/amd64
+    command:
+    - sh
+    - -c
+    - |
+      bin/yugabyted start --secure --advertise_address=yugabyted-2 --daemon=false --join=yugabyted-0 --tserver_flags='ysql_enable_profile=true' --ysql_enable_auth=true
+    restart: unless-stopped
+    ports:
+      - "7002:7000"
+      - "9002:9000"
+      - "5435:5433"
+    healthcheck:
+      test: ["CMD", "/home/yugabyte/postgres/bin/pg_isready", "-h", "yugabyted-0"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+    
